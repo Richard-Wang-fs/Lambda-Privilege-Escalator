@@ -34,7 +34,7 @@ This was part of a team project for the COMP6448 course to simulate an attack sc
 | 3. Lateral movement / role‑chaining | `recursive`, `attemp_assume`, `IAMAssumeTree` | Traverses trust relationships and common role names, storing successful hops.                 |
 | 4. Data exfiltration                 | `recycle`                                     | Assumes a pre‑provisioned**Recycler** role in the attacker’s account and writes JSON to S3. |
 
-![Attack flow chart](AWS Attack Chain.drawio.png)
+![Attack flow chart](https://github.com/Richard-Wang-fs/Lambda-Privilege-Escalator/blob/main/AWS%20Attack%20Chain.drawio.png)
 ---
 
 ## 3  Class reference
