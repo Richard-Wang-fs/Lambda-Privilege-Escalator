@@ -51,13 +51,12 @@ This was part of a team project for the COMP6448 course to simulate an attack sc
 1. **Zip & upload** `lambda_escalate.py`.
 2. Configure the following *environment variables*:
    
-   | Variable               | Meaning                                            |
+| Variable               | Meaning                                            |
 | ---------------------- | -------------------------------------------------- |
 | `RECYCLER_ARN`         | Recycler role ARN                                  |
 | `RECYCLER_BUCKET`      | Target S3 bucket                                   |
 | `RECYCLER_EXTERNAL_ID` | ExternalId value                                   |
-   
-   
+    
 3. Attach an **execution role** with only the permissions required for the lab (see sample policy in `LICENSE`).
 4. Invoke manually or trigger via an event source.
 
