@@ -1,0 +1,177 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Phase 2 - Add Permissions and Real Trust Policies for IAM Roles and Lambda Execution Role
+
+Parameters:
+  AccountId:
+    Type: String
+    Description: The 12-digit AWS Account ID where this stack will be deployed
+
+Resources:
+
+  # IAM Role - Tester_Lily (Lambda Execution Role)
+  TesterLily:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: Tester_Lily
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: TesterLilyPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sts:AssumeRole
+                  - lambda:InvokeFunction
+                Resource:
+                  Fn::Sub: arn:aws:iam::${AccountId}:role/Security_Analyst
+
+  # Lambda function using Tester_Lily
+  TestFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: TestLambdaUsingTesterLily
+      Handler: index.handler
+      Role: !GetAtt TesterLily.Arn
+      Runtime: python3.13
+      Timeout: 180
+      Code:
+        ZipFile: |
+          def handler(event, context):
+              return {"statusCode": 200, "body": "Test successful"}
+
+  # Role A - Security Analyst
+  SecurityAnalyst:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: Security_Analyst
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                Fn::Sub: arn:aws:iam::${AccountId}:role/Tester_Lily
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: SecurityAnalystPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - iam:ListRoles
+                  - iam:GetRole
+                  - iam:GetRolePolicy
+                  - sts:AssumeRole
+                Resource: "*"
+
+  # Role B - New Role (empty)
+  NewRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: New_Role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                Fn::Sub: arn:aws:iam::${AccountId}:role/Security_Analyst
+            Action: sts:AssumeRole
+
+  # Role C - Resource Manager
+  ResourceManager:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: Resource_Manager
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                Fn::Sub: arn:aws:iam::${AccountId}:role/Security_Analyst
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ResourceManagerPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListAllMyBuckets
+                  - rds:DescribeDBInstances
+                  - cloudwatch:ListMetrics
+                  - sts:AssumeRole
+                Resource:
+                  Fn::Sub: arn:aws:iam::${AccountId}:role/Devops_Engineer
+
+  # Role D - DevOps Engineer
+  DevopsEngineer:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: Devops_Engineer
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                Fn::Sub: arn:aws:iam::${AccountId}:role/Resource_Manager
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DevopsEngineerPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:UpdateFunctionCode
+                  - logs:CreateLogGroup
+                  - iam:GetUser
+                  - iam:ListAttachedUserPolicies
+                  - sts:AssumeRole
+                Resource:
+                  Fn::Sub: arn:aws:iam::${AccountId}:role/Privilege_Escalator
+
+  # Role E - Privilege Escalator
+  PrivilegeEscalator:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: Privilege_Escalator
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                Fn::Sub: arn:aws:iam::${AccountId}:role/Devops_Engineer
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: EscalatePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - iam:AttachUserPolicy
+                  - iam:CreateUser
+                  - iam:CreateAccessKey
+                  - iam:ListUsers
+                Resource: "*"
+
+Outputs:
+  EntryRole:
+    Description: Lambda execution role to start the attack chain
+    Value: !Ref TesterLily
+
+  LambdaFunction:
+    Description: Lambda function triggered using Tester_Lily role
+    Value: !Ref TestFunction

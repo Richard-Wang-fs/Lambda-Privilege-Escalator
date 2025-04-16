@@ -1,0 +1,109 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Phase 1 - Create IAM Roles and Lambda Execution Role Skeletons (No Real Trust or Policies)
+
+Parameters:
+  AccountId:
+    Type: String
+    Description: The 12-digit AWS Account ID where this stack will be deployed
+
+Resources:
+
+  # IAM Role - Tester_Lily (Lambda Execution Role placeholder)
+  TesterLily:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: Tester_Lily
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+
+  # Lambda function placeholder
+  TestFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: TestLambdaUsingTesterLily
+      Handler: index.handler
+      Role: !GetAtt TesterLily.Arn
+      Runtime: python3.9
+      Code:
+        ZipFile: |
+          def handler(event, context):
+              return {"statusCode": 200, "body": "Init deploy"}
+
+  # Role A - Security Analyst
+  SecurityAnalyst:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: Security_Analyst
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+
+  # Role B - New Role (empty)
+  NewRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: New_Role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+
+  # Role C - Resource Manager
+  ResourceManager:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: Resource_Manager
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+
+  # Role D - DevOps Engineer
+  DevopsEngineer:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: Devops_Engineer
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+
+  # Role E - Privilege Escalator
+  PrivilegeEscalator:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: Privilege_Escalator
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+
+Outputs:
+  EntryRole:
+    Description: Lambda execution role placeholder
+    Value: !Ref TesterLily
+
+  LambdaFunction:
+    Description: Placeholder Lambda function
+    Value: !Ref TestFunction
