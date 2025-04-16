@@ -141,3 +141,16 @@ After demonstration, clean up by:
 * Deleting the CloudFormation stack
 * Removing the `Tester_Lily` role and Lambda
 * Auditing all roles for excessive `sts:AssumeRole` or `iam:*` permissions
+
+---
+
+## 7  Acknowledgements
+
+The project was completed as part of a team effort in the COMP6448 course at UNSW.
+
+Thanks to our amazing teammates:
+**Adam Waite**, **Kong Teepirach**, **Krish Patel**, **Mengjing Cao**, and **Richard Wang**.
+
+It was a pleasure to work with such a collaborative and capable team!
+
+---
