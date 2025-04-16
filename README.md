@@ -27,22 +27,19 @@ This was part of a team project for the COMP6448 course to simulate an attack sc
 
 ## 2  How it works
 
-| Phase                                | Key Function(s)                               | Description                                                                                   |
-| ------------------------------------ | --------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| 1. Local privilege escalation        | `attach_policy`                               | Adds**`AdministratorAccess`** to the current user/role.                                       |
-| 2. Back‑door creation               | `create_backdoor_user`                        | Creates IAM user, login profile, and attaches admin policy.                                   |
-| 3. Lateral movement / role‑chaining | `recursive`, `attemp_assume`, `IAMAssumeTree` | Traverses trust relationships and common role names, storing successful hops.                 |
-| 4. Data exfiltration                 | `recycle`                                     | Assumes a pre‑provisioned**Recycler** role in the attacker’s account and writes JSON to S3. |
-
-![Attack flow chart](https://github.com/Richard-Wang-fs/Lambda-Privilege-Escalator/blob/main/AWS%20Attack%20Chain.drawio.png)
------------------
+| Phase                                | Key Function(s)                                     | Description                                                                                         |
+| ------------------------------------ | --------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| 1. Local privilege escalation        | `attach_policy`                                   | Adds**`AdministratorAccess`** to the current user/role.                                           |
+| 2. Back‑door creation               | `create_backdoor_user`                            | Creates IAM user, login profile, and attaches admin policy.                                         |
+| 3. Lateral movement / role‑chaining | `recursive`, `attemp_assume`, `IAMAssumeTree` | Traverses trust relationships and common role names, storing successful hops.                       |
+| 4. Data exfiltration                 | `recycle`                                         | Assumes a pre‑provisioned**Recycler** role in the attacker’s account and writes JSON to S3. |
 
 ## 3  Class reference
 
-| Class           | Purpose                                                                                                            |
-| --------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `RoleManager`   | Lists every IAM role, parses its trust policy, and returns roles that trust a given principal or the account root. |
-| `IAMAssumeTree` | Stores the**assume‑role graph** as a multi‑branch tree, prints credential chains, and exports all leaf paths.    |
+| Class             | Purpose                                                                                                               |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `RoleManager`   | Lists every IAM role, parses its trust policy, and returns roles that trust a given principal or the account root.    |
+| `IAMAssumeTree` | Stores the**assume‑role graph** as a multi‑branch tree, prints credential chains, and exports all leaf paths. |
 
 ---
 
@@ -51,8 +48,8 @@ This was part of a team project for the COMP6448 course to simulate an attack sc
 1. **Zip & upload** `lambda_escalate.py`.
 2. Configure the following *environment variables*:
 
-| Variable               | Meaning           |
-| ---------------------- | ----------------- |
+| Variable                 | Meaning           |
+| ------------------------ | ----------------- |
 | `RECYCLER_ARN`         | Recycler role ARN |
 | `RECYCLER_BUCKET`      | Target S3 bucket  |
 | `RECYCLER_EXTERNAL_ID` | ExternalId value  |
@@ -78,8 +75,8 @@ They were designed for structured academic demos that match the privilege-escala
 
 ### 📁 Files
 
-| File Name                             | Description                                             |
-| --------------------------------------- | --------------------------------------------------------- |
+| File Name                           | Description                                             |
+| ----------------------------------- | ------------------------------------------------------- |
 | `attack_env_phase1_init.yaml`     | Phase 1: Creates roles with placeholder trust policies. |
 | `attack_env_phase2_complete.yaml` | Phase 2: Adds real trust chains and permissions.        |
 
@@ -99,14 +96,14 @@ They were designed for structured academic demos that match the privilege-escala
 
 ### 🔐 Role Design Summary
 
-| Role Name                 | Purpose                                          | Permissions                                             | Trusted By                                  |
-| --------------------------- | -------------------------------------------------- | --------------------------------------------------------- | --------------------------------------------- |
-| `Tester_Lily`         | Lambda execution role created by a tester        | `sts:AssumeRole`to`Security_Analyst`            | Lambda service (`lambda.amazonaws.com`) |
+| Role Name               | Purpose                                          | Permissions                                       | Trusted By                                |
+| ----------------------- | ------------------------------------------------ | ------------------------------------------------- | ----------------------------------------- |
+| `Tester_Lily`         | Lambda execution role created by a tester        | `sts:AssumeRole`to `Security_Analyst`         | Lambda service (`lambda.amazonaws.com`) |
 | `Security_Analyst`    | For auditing roles & assuming others             | `iam:ListRoles`,`sts:AssumeRole`,`iam:Get*` | `Tester_Lily`                           |
-| `New_Role`            | Empty role with no permissions                   | —                                                      | `Security_Analyst`                      |
-| `Resource_Manager`    | Accesses AWS resources (S3, RDS, CW)             | S3/RDS/List metrics,`sts:AssumeRole`                | `Security_Analyst`                      |
+| `New_Role`            | Empty role with no permissions                   | —                                                | `Security_Analyst`                      |
+| `Resource_Manager`    | Accesses AWS resources (S3, RDS, CW)             | S3/RDS/List metrics,`sts:AssumeRole`            | `Security_Analyst`                      |
 | `Devops_Engineer`     | DevOps role that maintains Lambda & IAM insights | `lambda:*`,`iam:GetUser`,`sts:AssumeRole`   | `Resource_Manager`                      |
-| `Privilege_Escalator` | Legacy high-privilege role used in emergencies   | `iam:AttachUserPolicy`,`iam:CreateUser`         | `Devops_Engineer`                       |
+| `Privilege_Escalator` | Legacy high-privilege role used in emergencies   | `iam:AttachUserPolicy`,`iam:CreateUser`       | `Devops_Engineer`                       |
 
 ---
 
@@ -114,20 +111,21 @@ They were designed for structured academic demos that match the privilege-escala
 
 This setup simulates a real-world misconfiguration:
 
-> A tester named Lily repurposed her old `Tester_Lily` IAM role (originally used for security audits) as a Lambda execution role.
-> Unfortunately, she forgot to remove its high-trust permissions, allowing an attacker to leverage this role to start a **privilege escalation chain** that ends in `iam:CreateUser` access.
-> 
-> | Role Name           | Realistic Scenario |
-|---------------------|--------------------|
-| **Tester_Lily**       | A test engineer sets up this role to run a Lambda function for internal monitoring. She forgets that the role previously had permission to assume into a security audit role (`Security_Analyst`) during testing, leading to unintended trust. |
-| **Security_Analyst**  | In many orgs, analysts are allowed to `ListRoles` and assume into roles for security evaluations. However, these trust relationships are rarely tightly scoped or expired, making them abusable in chained escalation. |
-| **New_Role**          | Often created as a placeholder or in anticipation of a future service, this role remains unused—but trusted by `Security_Analyst`, creating a blind path that could be exploited. |
-| **Resource_Manager**  | A typical role for team leads or cloud engineers managing infrastructure. Permissions seem safe in isolation, but its trust by `Security_Analyst` expands its exposure. |
-| **Devops_Engineer**   | Commonly gets Lambda and IAM read access for deployment and service debugging. Trusting this role from `Resource_Manager` seems legitimate—until it becomes a bridge to escalate. |
-| **Privilege_Escalator** | A legacy admin role kept “just in case” for emergencies, often with permissions like `iam:AttachUserPolicy`. These roles are dangerous if trusted too openly, especially by DevOps teams without time-limited or condition-scoped trust. |
-> 
-> This configuration simulates a ​**real-world “everything looks reasonable” trap**​:
-> No single role is over-privileged, but when connected by careless trust relationships, they create a hidden path to full administrative control.
+A tester named Lily repurposed her old `Tester_Lily` IAM role (originally used for security audits) as a Lambda execution role.
+Unfortunately, she forgot to remove its high-trust permissions, allowing an attacker to leverage this role to start a **privilege escalation chain** that ends in `iam:CreateUser` access.
+
+
+| Role Name                     | Realistic Scenario                                                                                                                                                                                                                               |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Tester_Lily**         | A test engineer sets up this role to run a Lambda function for internal monitoring. She forgets that the role previously had permission to assume into a security audit role (`Security_Analyst`) during testing, leading to unintended trust. |
+| **Security_Analyst**    | In many orgs, analysts are allowed to `ListRoles` and assume into roles for security evaluations. However, these trust relationships are rarely tightly scoped or expired, making them abusable in chained escalation.                         |
+| **New_Role**            | Often created as a placeholder or in anticipation of a future service, this role remains unused—but trusted by `Security_Analyst`, creating a blind path that could be exploited.                                                             |
+| **Resource_Manager**    | A typical role for team leads or cloud engineers managing infrastructure. Permissions seem safe in isolation, but its trust by `Security_Analyst` expands its exposure.                                                                        |
+| **Devops_Engineer**     | Commonly gets Lambda and IAM read access for deployment and service debugging. Trusting this role from `Resource_Manager` seems legitimate—until it becomes a bridge to escalate.                                                             |
+| **Privilege_Escalator** | A legacy admin role kept “just in case” for emergencies, often with permissions like `iam:AttachUserPolicy`. These roles are dangerous if trusted too openly, especially by DevOps teams without time-limited or condition-scoped trust.     |
+
+This configuration simulates a **real-world “everything looks reasonable” trap**:
+No single role is over-privileged, but when connected by careless trust relationships, they create a hidden path to full administrative control.
 
 ---
 
@@ -138,4 +136,3 @@ After demonstration, clean up by:
 * Deleting the CloudFormation stack
 * Removing the `Tester_Lily` role and Lambda
 * Auditing all roles for excessive `sts:AssumeRole` or `iam:*` permissions
-
