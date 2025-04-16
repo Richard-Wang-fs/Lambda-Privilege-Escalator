@@ -117,14 +117,14 @@ This setup simulates a real-world misconfiguration:
 > A tester named Lily repurposed her old `Tester_Lily` IAM role (originally used for security audits) as a Lambda execution role.
 > Unfortunately, she forgot to remove its high-trust permissions, allowing an attacker to leverage this role to start a **privilege escalation chain** that ends in `iam:CreateUser` access.
 > 
-> | Role Name                      | Realistic Scenario                                                                                                                                                                                                                                 |
-| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Tester\_Lily**         | A test engineer sets up this role to run a Lambda function for internal monitoring. She forgets that the role previously had permission to assume into a security audit role (`Security_Analyst`) during testing, leading to unintended trust. |
-| **Security\_Analyst**    | In many orgs, analysts are allowed to`ListRoles`and assume into roles for security evaluations. However, these trust relationships are rarely tightly scoped or expired, making them abusable in chained escalation.                           |
-| **New\_Role**            | Often created as a placeholder or in anticipation of a future service, this role remains unused—but trusted by`Security_Analyst`, creating a blind path that could be exploited.                                                              |
-| **Resource\_Manager**    | A typical role for team leads or cloud engineers managing infrastructure. Permissions seem safe in isolation, but its trust by`Security_Analyst`expands its exposure.                                                                          |
-| **Devops\_Engineer**     | Commonly gets Lambda and IAM read access for deployment and service debugging. Trusting this role from`Resource_Manager`seems legitimate—until it becomes a bridge to escalate.                                                               |
-| **Privilege\_Escalator** | A legacy admin role kept “just in case” for emergencies, often with permissions like`iam:AttachUserPolicy`. These roles are dangerous if trusted too openly, especially by DevOps teams without time-limited or condition-scoped trust.      |
+> | Role Name           | Realistic Scenario |
+|---------------------|--------------------|
+| **Tester_Lily**       | A test engineer sets up this role to run a Lambda function for internal monitoring. She forgets that the role previously had permission to assume into a security audit role (`Security_Analyst`) during testing, leading to unintended trust. |
+| **Security_Analyst**  | In many orgs, analysts are allowed to `ListRoles` and assume into roles for security evaluations. However, these trust relationships are rarely tightly scoped or expired, making them abusable in chained escalation. |
+| **New_Role**          | Often created as a placeholder or in anticipation of a future service, this role remains unused—but trusted by `Security_Analyst`, creating a blind path that could be exploited. |
+| **Resource_Manager**  | A typical role for team leads or cloud engineers managing infrastructure. Permissions seem safe in isolation, but its trust by `Security_Analyst` expands its exposure. |
+| **Devops_Engineer**   | Commonly gets Lambda and IAM read access for deployment and service debugging. Trusting this role from `Resource_Manager` seems legitimate—until it becomes a bridge to escalate. |
+| **Privilege_Escalator** | A legacy admin role kept “just in case” for emergencies, often with permissions like `iam:AttachUserPolicy`. These roles are dangerous if trusted too openly, especially by DevOps teams without time-limited or condition-scoped trust. |
 > 
 > This configuration simulates a ​**real-world “everything looks reasonable” trap**​:
 > No single role is over-privileged, but when connected by careless trust relationships, they create a hidden path to full administrative control.
