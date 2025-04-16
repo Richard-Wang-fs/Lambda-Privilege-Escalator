@@ -161,7 +161,7 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
-                  - iam:AttachUserPolicy
+                  - iam:AttachRolePolicy
                   - iam:CreateUser
                   - iam:CreateAccessKey
                   - iam:ListUsers
